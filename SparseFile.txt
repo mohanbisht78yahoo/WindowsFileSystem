@@ -1,0 +1,137 @@
+	
+
+You can create sparse file only on on NTFS only (not on FAT32 or exFAT).
+using FSCTL_SET_SPARSE on NTFS only (not on FAT32 or exFAT).
+
+Linux ext4 also supports SparseFile
+
+
+2. Use a virtual disk image:
+Create a sparse NTFS-backed VHD or IMG.
+Mount it as a drive letter.
+Format the inside as FAT32 using Windows tools.
+The sparse behavior is handled by NTFS, while the virtual disk “contains” FAT32.
+
+You can 
+fsutil sparse queryflag myfile.dat
+
+How to create a sparse fle
+1. CreatFile() to create the file
+
+2. Mark it as sparse via FSCTL_SET_SPARSE
+	DeviceIoControl(hFile, FSCTL_SET_SPARSE, NULL, 0, NULL, 0, &bytesReturned, NULL);
+
+3. Optionally deallocate regions using FSCTL_SET_ZERO_DATA
+	FILE_ZERO_DATA_INFORMATION data = { startOffset, endOffset };
+	DeviceIoControl(hFile, FSCTL_SET_ZERO_DATA, &data, sizeof(data), NULL, 0, &bytesReturned, NULL);
+
+
+Do we need to regularly trim the sparse file
+Yes, we do need a trimming utility or logic when using sparse files as virtual disk drives, if your goal is to:
+ save disk spce : Sparse files grow over time as data is written — zeroed-out regions stay allocated unless explicitly deallocated
+ Sparse files grow over time as data is written — zeroed-out regions stay allocated unless explicitly deallocated
+ Repeated usage will bloat the file if you don’t reclaim unused regions                                           |
+ You can run into "disk is full" errors, even though most of the virtual disk is now zeroed.
+ 
+User Mode: 
+ FSCTL_SET_SPARSE : used with DeviceIoControl to mark the file as sparse (after create file)
+In Kernel 
+ Use  zwCreateFIle to create file and then call ZwFsControlFile with FSCTl_SET_PARSE) to make it sparse
+
+
+Sparse file does not work for encrypted or compressed files (encrypted and compressed by windows)
+
+
+
+FSCTL_SET_ZERO_DATA  zero out the data, works on both sparse and non sparse files (allocates disk space for zeros), 
+	doesn't needs to bepage aligned
+FSCTL_QUERY_ALLOCATED_RANGES  :: Gets only regions that take up disk space
+FSCTL_FILE_LEVEL_TRIM : Page aligned, works only for sparse file
+
+
+Use FSCTL_SET_ZERO_DATA when you need to clear specific data ranges within a file, especially for non-sparse files.
+Use FSCTL_FILE_LEVEL_TRIM to inform the underlying storage system about unused data ranges, allowing it to reclaim space and optimize storage utilization.
+For virtual disk management, especially in scenarios involving sparse files, FSCTL_FILE_LEVEL_TRIM is the appropriate choice to ensure efficient storage utilization.
+
+so with FSCTL_QUERY_ALLOCATED_RANGES, if the range has all zeros in it, i should call FSCTL_FILE_LEVEL_TRIM on it
+
+#include <windows.h>
+#include <stdio.h>
+
+int main() {
+    const wchar_t* filePath = L"sparsefile.img";
+    HANDLE hFile = CreateFileW(
+        filePath,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (hFile == INVALID_HANDLE_VALUE) {
+        printf("Error creating file: %lu\n", GetLastError());
+        return 1;
+    }
+
+    // Mark the file as sparse
+    DWORD temp;
+    if (!DeviceIoControl(
+        hFile,
+        FSCTL_SET_SPARSE,
+        NULL,
+        0,
+        NULL,
+        0,
+        &temp,
+        NULL
+    )) {
+        printf("Failed to mark as sparse: %lu\n", GetLastError());
+        CloseHandle(hFile);
+        return 1;
+    }
+
+    // Move file pointer to 512MB offset
+    LARGE_INTEGER offset;
+    offset.QuadPart = 512LL * 1024 * 1024;  // 512 MB
+    if (!SetFilePointerEx(hFile, offset, NULL, FILE_BEGIN)) {
+        printf("Failed to move file pointer: %lu\n", GetLastError());
+        CloseHandle(hFile);
+        return 1;
+    }
+
+    // Write 1 byte to extend the file
+    DWORD written;
+    BYTE data = 0;
+    if (!WriteFile(hFile, &data, 1, &written, NULL)) {
+        printf("Failed to write: %lu\n", GetLastError());
+        CloseHandle(hFile);
+        return 1;
+    }
+
+    printf("Sparse file '%ws' created and extended to 512MB.\n", filePath);
+    CloseHandle(hFile);
+    return 0;
+}
+
+
+
+SparseFile Approach
+
+User Mode
+──────────────
+[Control App / Tool]
+    ↓ IOCTL (path to sparse file)
+──────────────
+Kernel Mode (Driver)
+──────────────
+[Virtual Disk Driver]
+    ↳ Loads sparse file in kernel
+    ↳ Emulates a virtual block device (volume)
+    ↳ Handles IRP_MJ_READ / IRP_MJ_WRITE
+──────────────
+Windows I/O Stack
+    ↳ Mount Manager, Format tools (FAT32)
+
+
