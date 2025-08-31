@@ -1,0 +1,165 @@
+📂 Legacy File System Filter Driver Interview Questions (with Answers)
+Basics & Architecture
+
+1. What is a legacy file system filter driver?
+➡️ It is a kernel-mode driver that attaches directly to a file system’s device stack to monitor or modify I/O requests by intercepting IRPs.
+
+2. How does a legacy filter attach to the device stack?
+➡️ By calling IoAttachDeviceToDeviceStack on the target device object representing the file system volume.
+
+3. How is this different from a mini filter driver?
+➡️ Legacy filters attach directly to device stacks and handle IRPs themselves; mini filters attach via the Filter Manager and use callback routines abstracting IRPs.
+
+IRP Handling
+
+4. How does a legacy filter intercept IRPs?
+➡️ It replaces the device object’s dispatch routines with its own functions to process IRPs.
+
+5. What must a legacy filter do after processing an IRP?
+➡️ It should either complete the IRP or pass it down the device stack by calling IoCallDriver.
+
+6. How do legacy filters handle IRP completion?
+➡️ They set completion routines with IoSetCompletionRoutine to be notified when lower drivers finish processing.
+
+Attachment & Detachment
+
+7. What issues can occur when attaching or detaching legacy filters?
+➡️ Attaching to a busy or unready device can cause failures; improper detachment can cause crashes or leaks if IRPs are still pending.
+
+8. How do you safely detach a legacy filter?
+➡️ Complete all pending IRPs, remove the filter device object, and detach from the device stack using IoDetachDevice.
+
+Synchronization & IRQL
+
+9. At what IRQL do legacy filter drivers operate?
+➡️ Usually at PASSIVE_LEVEL or DISPATCH_LEVEL depending on the IRP; must avoid pageable code at high IRQL.
+
+10. How do legacy filters synchronize access to shared data?
+➡️ Using spin locks, mutexes, or fast mutexes depending on the IRQL.
+
+Common Challenges
+
+11. What problems can legacy filters cause?
+➡️ Deadlocks, IRP leaks, crashes due to incorrect IRP handling, priority inversion, and compatibility issues with other filters.
+
+12. How do you debug legacy filter drivers?
+➡️ Use kernel debuggers, analyze IRP flow, check IRQL levels, and verify proper attachment/detachment and completion of IRPs.
+
+Miscellaneous
+
+13. Can multiple legacy filters attach to the same device stack?
+➡️ Yes, but the order is not guaranteed and can cause conflicts.
+
+14. What is the impact of legacy filters on system stability?
+➡️ They can negatively affect stability and performance if not carefully designed due to direct IRP handling and complex synchronization.
+
+
+
+Scenario 1: System crashes (Bug Check) on driver load or unload
+
+Cause:
+Improper attachment/detachment to device stacks; attempting to detach while IRPs are still pending.
+
+Fix:
+
+Ensure all pending IRPs are completed before detaching.
+
+Use IoDetachDevice carefully and only after all operations have ceased.
+
+Validate return status of IoAttachDeviceToDeviceStack.
+
+Synchronize detach to avoid race conditions.
+
+Scenario 2: IRPs never complete or hang system
+
+Cause:
+The filter driver intercepts an IRP but never calls IoCallDriver to pass it down or never completes it.
+
+Fix:
+
+Always pass IRPs down the device stack or complete them properly.
+
+In completion routines, return correct status and ensure IoCompleteRequest is called once.
+
+Implement proper error handling in dispatch routines.
+
+Scenario 3: Deadlocks or high CPU usage
+
+Cause:
+Improper use of synchronization primitives or holding spin locks too long at elevated IRQL.
+
+Fix:
+
+Avoid lengthy operations inside spin locks.
+
+Don’t call pageable code at DISPATCH_LEVEL.
+
+Use appropriate locking mechanisms for the IRQL context.
+
+Break down critical sections to reduce lock contention.
+
+Scenario 4: Compatibility issues with other filter drivers
+
+Cause:
+Uncoordinated attachment order, incomplete IRP handling, or conflicts in IRP manipulation.
+
+Fix:
+
+Follow best practices to correctly forward IRPs.
+
+Avoid modifying IRPs unnecessarily.
+
+Use standard IRP forwarding patterns.
+
+Test with other filters to detect conflicts.
+
+Scenario 5: Memory leaks or resource exhaustion
+
+Cause:
+Not freeing allocated memory, contexts, or failing to release references on objects.
+
+Fix:
+
+Carefully track all allocations.
+
+Free contexts and allocated buffers during unload or cleanup.
+
+Use tools like Driver Verifier to detect leaks.
+
+Follow reference counting conventions strictly.
+
+Scenario 6: Incorrect IRQL usage causes bugchecks
+
+Cause:
+Calling pageable functions or accessing pageable memory at IRQL > APC_LEVEL.
+
+Fix:
+
+Ensure dispatch routines running at DISPATCH_LEVEL don’t call pageable code.
+
+Use __try/__except or annotations for IRQL correctness.
+
+Use nonpaged pool for data accessed at high IRQL.
+
+Scenario 7: Unexpected file system behavior or data corruption
+
+Cause:
+Improper modification of IRP parameters or bypassing necessary operations.
+
+Fix:
+
+Avoid altering parameters unless absolutely necessary.
+
+Preserve original IRP fields before modification.
+
+Pass IRPs down without interference if no filtering needed.
+
+Scenario 8: Driver fails to attach to device
+
+Cause:
+Target device object not ready or already attached by another filter with higher priority.
+
+Fix:
+Check device readiness before attaching.
+Handle failure of IoAttachDeviceToDeviceStack gracefully.
+Retry attaching later or during device arrival.
