@@ -1,0 +1,96 @@
+
+How to allocate contiguous memory:
+Use MmAllocateContiguousMemory (or MmAllocateContiguousMemorySpecifyCache) to allocate a block of physically contiguous pages. This is commonly needed for DMA buffers or hardware that requires contiguous physical memory.
+Example snippet:
+
+PVOID contiguousBuffer = MmAllocateContiguousMemory(size, HighestAcceptableAddress);
+if (contiguousBuffer == NULL) {
+    // Allocation failed}
+Remember, contiguous memory is a limited resource and large requests may fail if there isn’t a big enough free block.
+Contiguous memory allocated this way must be freed with MmFreeContiguousMemo
+
+Why not just use ExAllocatePool?
+ExAllocatePool gives you contiguous virtual memory, but not necessarily physically contiguous. For most drivers, virtual contiguity is enough.
+For hardware that requires physical contiguity (e.g., DMA without scatter/gather), you must use MmAllocateContiguousMemory.
+
+
+🧠 Virtual Memory & Memory Allocation Interview Questions (with Answers)
+1. What is virtual memory in Windows?
+
+➡️ Virtual memory is an abstraction that provides each process with its own address space, decoupled from physical memory. The OS manages mapping virtual addresses to physical RAM or disk via paging.
+
+2. What is the role of the Memory Manager (Mm)?
+
+➡️ The Memory Manager handles allocation, paging, mapping, and protection of virtual memory. It maintains page tables and manages working sets.
+
+3. What is a page fault and how does Windows handle it?
+
+➡️ A page fault occurs when a process accesses a page not currently in physical memory. The Memory Manager traps this fault and loads the page from disk or zero-fills a new page.
+
+4. What is the difference between ExAllocatePool and MmAllocatePagesForMdl?
+
+➡️ ExAllocatePool allocates virtual memory from kernel pools (paged or non-paged). MmAllocatePagesForMdl allocates physical pages and returns an MDL describing them for DMA or direct hardware access.
+
+5. What is an MDL (Memory Descriptor List)?
+
+➡️ An MDL describes a physical memory buffer by listing its physical pages. It’s used to lock pages in memory and safely pass buffers between kernel and hardware.
+
+6. What is the difference between PagedPool and NonPagedPool?
+
+➡️ PagedPool memory can be paged out to disk, so it must be accessed only at PASSIVE_LEVEL. NonPagedPool memory is always resident and can be accessed at any IRQL.
+
+7. How do you allocate non-paged memory in a driver?
+
+➡️ Use ExAllocatePoolWithTag(NonPagedPool, size, tag). This memory stays resident in physical RAM.
+
+8. What is the working set of a process?
+
+➡️ The working set is the set of physical pages currently mapped into the process’s virtual address space and resident in RAM.
+
+9. What is the difference between user-mode and kernel-mode virtual memory?
+
+➡️ User-mode virtual memory is isolated per process and subject to security restrictions. Kernel-mode memory is shared system-wide, with direct access to physical memory and hardware.
+
+10. What is the difference between MmMapIoSpace and ZwMapViewOfSection?
+
+➡️ MmMapIoSpace maps physical device memory into kernel virtual address space for drivers. ZwMapViewOfSection maps file-backed sections into virtual memory, usable by user-mode or kernel-mode.
+
+11. What is copy-on-write (COW) in Windows?
+
+➡️ When processes share pages, a page is marked copy-on-write so that when one process writes to it, a private copy is made, preserving isolation.
+
+12. How does the Windows kernel handle memory fragmentation?
+
+➡️ The Memory Manager compacts free pages and uses efficient allocation algorithms to minimize fragmentation, but long uptime and heavy allocation patterns can still cause fragmentation.
+
+13. What is the MmGetSystemAddressForMdlSafe function?
+
+➡️ It returns a safe kernel virtual address for an MDL, ensuring the pages are mapped and accessible at the current IRQL.
+
+14. What is a guard page?
+
+➡️ A guard page is a protected page that triggers an access violation if accessed, used to detect stack overflows or buffer overruns.
+
+15. What are the main Windows memory pools?
+
+➡️ NonPagedPool, PagedPool, and SessionPool. NonPagedPool is always resident, PagedPool can be paged out, SessionPool is used for session-specific allocations.
+
+16. How does the kernel ensure safe access to pageable memory at elevated IRQL?
+
+➡️ It prevents drivers from accessing pageable memory above APC_LEVEL. Accessing pageable memory at DISPATCH_LEVEL or higher causes a bugcheck.
+
+17. What is VirtualAlloc used for in user mode?
+
+➡️ VirtualAlloc reserves or commits virtual memory pages in the user-mode address space, enabling dynamic memory allocation.
+
+18. What is the difference between reserving and committing memory?
+
+➡️ Reserving allocates a range of virtual addresses without physical backing; committing allocates actual physical pages to the reserved range.
+
+19. How do drivers handle DMA buffer allocation?
+
+➡️ They allocate contiguous physical memory with MmAllocateContiguousMemory or allocate scatter/gather buffers with MDLs.
+
+20. What is the purpose of MmProbeAndLockPages?
+
+➡️ It locks user-mode pages in memory, preventing paging during I/O operations, ensuring buffers are stable for DMA or data transfer.
