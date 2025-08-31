@@ -1,0 +1,105 @@
+IRP & IRQL Interview Questions (with Answers)
+IRP (I/O Request Packet)
+
+1. What is an IRP in Windows Driver Model?
+➡️ IRP is a data structure used by the Windows I/O manager to represent I/O operations, carrying information and parameters about the request between drivers.
+
+2. How is an IRP created and who is responsible?
+➡️ The I/O manager creates IRPs when user-mode or kernel-mode requests come in and passes them down the driver stack.
+
+3. What are IRP Major and Minor function codes?
+➡️ Major codes specify the general type of operation (e.g., read, write, device control), while minor codes provide additional details for some major functions.
+
+4. What is the purpose of the IRP stack locations?
+➡️ Each driver in the stack gets its own IRP stack location to store context and parameters specific to its handling of the IRP.
+
+5. How does a driver complete an IRP?
+➡️ The driver sets the IoStatus.Status and IoStatus.Information, calls IoCompleteRequest(), and returns an NTSTATUS code.
+
+6. What is IoSkipCurrentIrpStackLocation() used for?
+➡️ It forwards the IRP to the next lower driver without modifying parameters.
+
+7. How do you handle pending IRPs?
+➡️ Mark IRP pending with IoMarkIrpPending() and return STATUS_PENDING; complete it asynchronously later.
+
+8. What is an IRP cancellation?
+➡️ The system can cancel IRPs, typically if the requesting thread terminates. Drivers must implement cancellation routines to safely abort operations.
+
+IRQL (Interrupt Request Level)
+
+9. What is IRQL in Windows?
+➡️ IRQL is a hardware and software priority scheme used by Windows to manage interrupt handling and synchronize access to shared resources.
+
+10. What are the common IRQL levels?
+➡️ Key levels include PASSIVE_LEVEL (0), APC_LEVEL (1), DISPATCH_LEVEL (2), and higher for hardware interrupts (DIRQL).
+
+11. What code can run at PASSIVE_LEVEL?
+➡️ Code that can block, wait, or perform pageable memory operations (e.g., user-mode calls, paging I/O).
+
+12. What restrictions exist at DISPATCH_LEVEL?
+➡️ Cannot perform operations that may block or access pageable memory; must use non-paged pool and spin locks.
+
+13. When do you raise IRQL?
+➡️ To protect critical sections or spin locks from interruptions, you raise IRQL to DISPATCH_LEVEL or higher.
+
+14. What is the difference between KeAcquireSpinLock and KeAcquireSpinLockRaiseToDpc?
+➡️ KeAcquireSpinLock raises IRQL to DISPATCH_LEVEL and acquires the lock; KeAcquireSpinLockRaiseToDpc raises IRQL from any level to DISPATCH_LEVEL and acquires the lock.
+
+15. Why can’t you call pageable functions at high IRQL?
+➡️ Because pageable memory may be swapped out; accessing it at high IRQL would cause page faults that cannot be handled at elevated IRQL, leading to a system crash.
+
+16. What happens if you try to acquire a mutex at DISPATCH_LEVEL?
+➡️ It causes a bug check because mutexes can block, which is not allowed at high IRQL.
+
+17. How can you lower IRQL after raising it?
+➡️ Use KeLowerIrql with the previous IRQL value saved during raising.
+
+18. How does IRQL relate to Deferred Procedure Calls (DPCs)?
+➡️ DPCs run at DISPATCH_LEVEL, allowing deferred work after an interrupt at a safe priority.
+
+
+
+
+| **IRQL Level**              | **Lock Types You CAN Use**                                                             | **Lock Types You SHOULD NOT Use**                   | **Reason**                                                                                                                                    |
+| --------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **PASSIVE\_LEVEL (0)**      | - Mutex (KMUTEX)                                                                       | - None (all allowed)                                | At passive level, threads can block, wait, or be preempted safely. All lock types allowed.                                                    |
+|                             | - Fast Mutex                                                                           |                                                     |                                                                                                                                               |
+|                             | - Executive Resource (ERESOURCE)                                                       |                                                     |                                                                                                                                               |
+|                             | - Spin Lock (allowed but usually unnecessary here)                                     |                                                     |                                                                                                                                               |
+|                             |                                                                                        |                                                     |                                                                                                                                               |
+| **APC\_LEVEL (1)**          | - Spin Locks                                                                           | - Mutex, Fast Mutex, ERESOURCE (because they block) | At APC\_LEVEL, code cannot block or wait, so locks that may block are not allowed. Spin locks are designed for this level.                    |
+|                             |                                                                                        |                                                     |                                                                                                                                               |
+| **DISPATCH\_LEVEL (2)**     | - Spin Locks                                                                           | - Mutex, Fast Mutex, ERESOURCE                      | Same as APC\_LEVEL, no blocking allowed; spin locks are the only safe synchronization primitive.                                              |
+|                             |                                                                                        |                                                     |                                                                                                                                               |
+| **DIRQL (Device IRQL > 2)** | - Generally, no locks should be acquired here (some low-level hardware locks possible) | - Any standard Windows synchronization primitive    | At DIRQL, almost no synchronization primitives can be used safely due to extreme restrictions. Operations must be very fast and non-blocking. |
+
+
+
+Explanation & Details:
+
+Mutex / Fast Mutex / ERESOURCE:
+These locks may cause the thread to block or wait, which is only safe at PASSIVE_LEVEL. Blocking at higher IRQL causes a system crash (bugcheck).
+
+Spin Locks:
+Designed to work at high IRQL (DISPATCH_LEVEL and below). They spin (busy-wait) instead of blocking, so they can be safely acquired at DISPATCH_LEVEL and at APC_LEVEL.
+Note: At PASSIVE_LEVEL, spin locks are allowed but often unnecessary due to thread scheduling.
+
+Avoid blocking calls at DISPATCH_LEVEL or higher:
+This includes pageable memory access, waiting on events, or acquiring locks that may block.
+
+Why blocking locks are forbidden at higher IRQL:
+Because the scheduler cannot swap out a thread at elevated IRQL, so any blocking operation would deadlock the system.
+
+
+
+| **Lock**   | **Allowed at PASSIVE\_LEVEL?** | **Allowed at APC\_LEVEL?** | **Allowed at DISPATCH\_LEVEL?** | **Reason**                    |
+| ---------- | ------------------------------ | -------------------------- | ------------------------------- | ----------------------------- |
+| Mutex      | Yes                            | No                         | No                              | Blocks, so only passive level |
+| Fast Mutex | Yes                            | No                         | No                              | Blocks, only passive level    |
+| ERESOURCE  | Yes                            | No                         | No                              | Blocks, only passive level    |
+| Spin Lock  | Yes (uncommon)                 | Yes                        | Yes                             | Non-blocking, busy wait       |
+
+	
+Summary
+Mutex is a kernel dispatcher object with full waiting and timeout support, suitable when you need to wait on multiple objects or support timeouts.
+Fast Mutex is a lightweight synchronization primitive optimized for quick locking/unlocking where timeout or wait on object is not required.
